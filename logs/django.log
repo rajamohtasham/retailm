@@ -1,0 +1,17 @@
+Watching for file changes with StatReloader
+Not Found: /
+Not Found: /favicon.ico
+Forbidden: /api/branches/
+Watching for file changes with StatReloader
+Not Found: /
+Not Found: /favicon.ico
+Unauthorized: /api/auth/audit-logs/
+Unauthorized: /api/auth/audit-logs/
+Unauthorized: /api/auth/branches/
+Unauthorized: /api/auth/branches/
+Unauthorized: /api/auth/branches/
+Unauthorized: /api/auth/audit-logs/
+Unauthorized: /api/auth/audit-logs/
+Method Not Allowed: /api/token/
+Unauthorized: /api/auth/branches/
+Unauthorized: /api/auth/branches/
