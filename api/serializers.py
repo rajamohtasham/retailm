@@ -27,6 +27,7 @@ class ProductSerializer(serializers.ModelSerializer):
     branch_id = serializers.PrimaryKeyRelatedField(
         queryset=Branch.objects.all(), source="branch", write_only=True, required=False
     )
+    image_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Product
@@ -43,10 +44,19 @@ class ProductSerializer(serializers.ModelSerializer):
             "expiry_date",
             "branch",
             "branch_id",
+            "image",        # File upload field
+            "image_url",    # Absolute URL for convenience
             "is_active",
             "created_at",
             "updated_at",
         ]
+
+    def get_image_url(self, obj):
+        request = self.context.get("request")
+        if obj.image and request:
+            return request.build_absolute_uri(obj.image.url)
+        return None
+
 
 
 class VendorSerializer(serializers.ModelSerializer):

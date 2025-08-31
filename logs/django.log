@@ -15,3 +15,6 @@ Unauthorized: /api/auth/audit-logs/
 Method Not Allowed: /api/token/
 Unauthorized: /api/auth/branches/
 Unauthorized: /api/auth/branches/
+Watching for file changes with StatReloader
+Not Found: /
+Not Found: /favicon.ico

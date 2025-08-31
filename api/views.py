@@ -64,8 +64,9 @@ class ProductViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"], url_path="low-stock")
     def low_stock(self, request):
         low_stock_qs = self.get_queryset().filter(quantity__lte=F("reorder_level"))
-        serializer = self.get_serializer(low_stock_qs, many=True)
+        serializer = self.get_serializer(low_stock_qs, many=True, context={"request": request})
         return Response(serializer.data)
+
 
 
 # ---------- VENDOR ----------
