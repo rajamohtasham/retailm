@@ -178,7 +178,7 @@ class SaleSerializer(serializers.ModelSerializer):
             "subtotal",
             "total_amount",
             "created_at",
-            "created_by",
+            "created_by",        # <-- now read-only
             "created_by_name",
         ]
 
@@ -190,9 +190,13 @@ class SaleSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         items_data = validated_data.pop("items")
         user = self.context["request"].user
+
+        # ✅ remove created_by from validated_data if it exists
+        validated_data.pop("created_by", None)
+
         sale = Sale.objects.create(created_by=user, **validated_data)
 
-        # Validate stock then create items; DO NOT change product.quantity here.
+        # Validate stock then create items
         for item_data in items_data:
             product = item_data["product"]
             quantity = item_data["quantity"]
@@ -211,6 +215,7 @@ class SaleSerializer(serializers.ModelSerializer):
         # Ensure totals reflect discount and all items
         sale.calculate_totals()
         return sale
+
 
 
 # ---------------------- OTHERS ----------------------
