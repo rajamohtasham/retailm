@@ -16,12 +16,14 @@ from .models import (
 )
 
 
+# ---------------------- BRANCH ----------------------
 class BranchSerializer(serializers.ModelSerializer):
     class Meta:
         model = Branch
         fields = ["id", "name", "location", "phone", "email", "created_at", "updated_at"]
 
 
+# ---------------------- PRODUCT ----------------------
 class ProductSerializer(serializers.ModelSerializer):
     branch = BranchSerializer(read_only=True)
     branch_id = serializers.PrimaryKeyRelatedField(
@@ -44,8 +46,8 @@ class ProductSerializer(serializers.ModelSerializer):
             "expiry_date",
             "branch",
             "branch_id",
-            "image",        # File upload field
-            "image_url",    # Absolute URL for convenience
+            "image",
+            "image_url",
             "is_active",
             "created_at",
             "updated_at",
@@ -58,7 +60,7 @@ class ProductSerializer(serializers.ModelSerializer):
         return None
 
 
-
+# ---------------------- VENDOR ----------------------
 class VendorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Vendor
@@ -82,7 +84,6 @@ class PurchaseItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PurchaseItem
-        # FIX: total_price is the correct field; remove total_cost
         fields = ["id", "product", "product_name", "quantity", "unit_cost", "total_price"]
         read_only_fields = ["total_price", "product_name"]
 
@@ -105,15 +106,14 @@ class PurchaseSerializer(serializers.ModelSerializer):
             "subtotal",
             "discount",
             "total_amount",
-            "paid_amount",        # added
-            "payment_method",     # added
-            "created_by",
+            "paid_amount",
+            "payment_method",
             "created_by_name",
             "created_at",
             "notes",
             "items",
         ]
-        read_only_fields = ["subtotal", "total_amount", "created_at", "created_by"]
+        read_only_fields = ["subtotal", "total_amount", "created_at"]
 
     def validate_items(self, value):
         if not value:
@@ -122,20 +122,52 @@ class PurchaseSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         items_data = validated_data.pop("items")
+        validated_data.pop("created_by", None)  # ✅ prevent duplicate
         user = self.context["request"].user
         purchase = Purchase.objects.create(created_by=user, **validated_data)
 
-        # Create items; let the model compute total_price and recalc totals.
+        total_amount = Decimal("0.00")
         for item_data in items_data:
-            PurchaseItem.objects.create(
+            purchase_item = PurchaseItem.objects.create(
                 purchase=purchase,
                 product=item_data["product"],
                 quantity=item_data["quantity"],
                 unit_cost=item_data["unit_cost"],
             )
+            total_amount += purchase_item.total_price
 
-        # Ensure totals are correct (also computed during each item save)
+            # Stock Movement (IN)
+            StockMovement.objects.create(
+                product=purchase_item.product,
+                branch=purchase.branch,
+                movement_type="IN",
+                quantity=purchase_item.quantity,
+                reference=f"PUR-{purchase.invoice_no}",
+                created_by=user,
+            )
+
         purchase.calculate_totals()
+
+        # Ledger Entry (Debit)
+        LedgerEntry.objects.create(
+            date=purchase.created_at.date(),
+            description=f"Purchase Invoice {purchase.invoice_no}",
+            transaction_type="Debit",
+            amount=total_amount,
+            reference=f"PUR-{purchase.invoice_no}",
+            branch=purchase.branch,
+            created_by=user,
+        )
+
+        # Audit Log
+        AuditLog.objects.create(
+            user=user,
+            action="CREATE",
+            model_name="Purchase",
+            object_id=purchase.id,
+            changes=json.dumps({"invoice_no": purchase.invoice_no, "items": len(items_data)}),
+            ip_address=self.context["request"].META.get("REMOTE_ADDR"),
+        )
         return purchase
 
 
@@ -168,19 +200,12 @@ class SaleSerializer(serializers.ModelSerializer):
             "total_amount",
             "paid_amount",
             "payment_method",
-            "created_by",
             "created_by_name",
             "created_at",
             "notes",
             "items",
         ]
-        read_only_fields = [
-            "subtotal",
-            "total_amount",
-            "created_at",
-            "created_by",        # <-- now read-only
-            "created_by_name",
-        ]
+        read_only_fields = ["subtotal", "total_amount", "created_at"]
 
     def validate_items(self, value):
         if not value:
@@ -189,36 +214,63 @@ class SaleSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         items_data = validated_data.pop("items")
+        validated_data.pop("created_by", None)  # ✅ prevent duplicate
         user = self.context["request"].user
-
-        # ✅ remove created_by from validated_data if it exists
-        validated_data.pop("created_by", None)
-
         sale = Sale.objects.create(created_by=user, **validated_data)
 
-        # Validate stock then create items
+        total_amount = Decimal("0.00")
         for item_data in items_data:
             product = item_data["product"]
             quantity = item_data["quantity"]
             unit_price = item_data["unit_price"]
 
-            if product and product.quantity < quantity:
+            if product.quantity < quantity:
                 raise serializers.ValidationError(f"Not enough stock for {product.name}")
 
-            SaleItem.objects.create(
+            sale_item = SaleItem.objects.create(
                 sale=sale,
                 product=product,
                 quantity=quantity,
                 unit_price=unit_price,
             )
+            total_amount += sale_item.total_price
 
-        # Ensure totals reflect discount and all items
+            # Stock Movement (OUT)
+            StockMovement.objects.create(
+                product=product,
+                branch=sale.branch,
+                movement_type="OUT",
+                quantity=quantity,
+                reference=f"SAL-{sale.invoice_no}",
+                created_by=user,
+            )
+
         sale.calculate_totals()
+
+        # Ledger Entry (Credit)
+        LedgerEntry.objects.create(
+            date=sale.created_at.date(),
+            description=f"Sale Invoice {sale.invoice_no}",
+            transaction_type="Credit",
+            amount=total_amount,
+            reference=f"SAL-{sale.invoice_no}",
+            branch=sale.branch,
+            created_by=user,
+        )
+
+        # Audit Log
+        AuditLog.objects.create(
+            user=user,
+            action="CREATE",
+            model_name="Sale",
+            object_id=sale.id,
+            changes=json.dumps({"invoice_no": sale.invoice_no, "items": len(items_data)}),
+            ip_address=self.context["request"].META.get("REMOTE_ADDR"),
+        )
         return sale
 
 
-
-# ---------------------- OTHERS ----------------------
+# ---------------------- LEDGER ----------------------
 class LedgerEntrySerializer(serializers.ModelSerializer):
     branch_name = serializers.CharField(source="branch.name", read_only=True)
     created_by_name = serializers.CharField(source="created_by.username", read_only=True)
@@ -239,6 +291,7 @@ class LedgerEntrySerializer(serializers.ModelSerializer):
         ]
 
 
+# ---------------------- STOCK ----------------------
 class StockMovementSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source="product.name", read_only=True)
     branch_name = serializers.CharField(source="branch.name", read_only=True)
@@ -262,6 +315,7 @@ class StockMovementSerializer(serializers.ModelSerializer):
         ]
 
 
+# ---------------------- AUDIT ----------------------
 class AuditLogSerializer(serializers.ModelSerializer):
     user_name = serializers.CharField(source="user.username", read_only=True)
     changes = serializers.SerializerMethodField()
@@ -287,6 +341,7 @@ class AuditLogSerializer(serializers.ModelSerializer):
             return obj.changes
 
 
+# ---------------------- USER ----------------------
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False)
     branch_name = serializers.CharField(source="branch.name", read_only=True)
@@ -309,7 +364,6 @@ class UserSerializer(serializers.ModelSerializer):
             "date_joined",
         ]
         read_only_fields = ["is_staff", "is_active", "date_joined"]
-        extra_kwargs = {"password": {"write_only": True}}
 
     def create(self, validated_data):
         password = validated_data.pop("password", None)

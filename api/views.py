@@ -7,7 +7,6 @@ from django.core.mail import send_mail
 from django.http import HttpResponse
 from django.db.models import F, Sum
 from django.db.models.functions import TruncDate
-import io
 import pandas as pd
 from io import BytesIO
 from reportlab.pdfgen import canvas
@@ -68,7 +67,6 @@ class ProductViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
 
-
 # ---------- VENDOR ----------
 class VendorViewSet(viewsets.ModelViewSet):
     queryset = Vendor.objects.all()
@@ -92,16 +90,7 @@ class PurchaseViewSet(viewsets.ModelViewSet):
     @transaction.atomic
     def perform_create(self, serializer):
         purchase = serializer.save(created_by=self.request.user)
-        for pi in purchase.items.all():
-            if pi.product:
-                StockMovement.objects.create(
-                    product=pi.product,
-                    quantity=pi.quantity,
-                    movement_type="in",
-                    branch=purchase.branch,
-                    created_by=self.request.user,
-                    reference=f"PUR-{purchase.invoice_no}",
-                )
+        # ⚠️ StockMovement and LedgerEntry are handled in serializer/signal
         send_mail(
             subject=f"New Purchase Recorded (Invoice {purchase.invoice_no})",
             message=f"A new purchase from {getattr(purchase.vendor, 'name', 'Unknown Vendor')} was recorded.",
@@ -134,16 +123,7 @@ class SaleViewSet(viewsets.ModelViewSet):
     @transaction.atomic
     def perform_create(self, serializer):
         sale = serializer.save(created_by=self.request.user)
-        for si in sale.items.all():
-            if si.product:
-                StockMovement.objects.create(
-                    product=si.product,
-                    quantity=si.quantity,
-                    movement_type="out",
-                    branch=sale.branch,
-                    created_by=self.request.user,
-                    reference=f"SALE-{sale.invoice_no}",
-                )
+        # ⚠️ StockMovement and LedgerEntry are handled in serializer/signal
         send_mail(
             subject=f"New Sale Recorded (Invoice {sale.invoice_no})",
             message=f"A new sale for {sale.customer_name or 'Walk-in Customer'} was recorded.",
@@ -199,10 +179,7 @@ class UserViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated & (IsAdminOrManager | ReadOnly)]
 
 
-
-
-
-
+# ---------- REPORT ----------
 class ReportViewSet(viewsets.ViewSet):
     """
     API endpoints for exporting reports (Excel/PDF).
