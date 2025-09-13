@@ -136,9 +136,14 @@ class PurchaseSerializer(serializers.ModelSerializer):
             )
             total_amount += purchase_item.total_price
 
+            # ✅ Update product stock
+            product = purchase_item.product
+            product.quantity += purchase_item.quantity
+            product.save()
+
             # Stock Movement (IN)
             StockMovement.objects.create(
-                product=purchase_item.product,
+                product=product,
                 branch=purchase.branch,
                 movement_type="IN",
                 quantity=purchase_item.quantity,
@@ -234,6 +239,10 @@ class SaleSerializer(serializers.ModelSerializer):
                 unit_price=unit_price,
             )
             total_amount += sale_item.total_price
+
+            # ✅ Update product stock
+            product.quantity -= sale_item.quantity
+            product.save()
 
             # Stock Movement (OUT)
             StockMovement.objects.create(
